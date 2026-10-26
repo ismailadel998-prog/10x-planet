@@ -251,6 +251,24 @@ export default function Teacher() {
           </button>
         </div>
 
+        <section className="dcard live-card">
+          <div className="live-card-text">
+            <h3>Live game for {cls}</h3>
+            <p>Opens a game screen to share in your class call. Students join on their phones with a code.</p>
+          </div>
+          <div className="live-card-btns">
+            <a className="dbtn primary" href={`/host?class=${cls}&mode=turn`} target="_blank" rel="noreferrer">
+              Team turns
+            </a>
+            <a className="dbtn primary orange" href={`/host?class=${cls}&mode=race`} target="_blank" rel="noreferrer">
+              Race
+            </a>
+            <a className="dbtn" href="/?mode=team" target="_blank" rel="noreferrer">
+              One-screen teams
+            </a>
+          </div>
+        </section>
+
         <div className="tiles">
           <div className="tile">
             <small>Finished</small>

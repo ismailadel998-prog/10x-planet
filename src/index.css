@@ -1983,3 +1983,8 @@ kbd {
   color: var(--cyan-200);
   font-size: 20px;
 }
+.join-live-btn {
+  text-decoration: none;
+  height: 56px;
+  font-size: 20px;
+}

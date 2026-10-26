@@ -1,1 +1,1 @@
-{"root":["./src/App.tsx","./src/Teacher.tsx","./src/api.ts","./src/art.tsx","./src/game.ts","./src/main.tsx","./src/roster.ts","./src/sound.ts","./src/vite-env.d.ts"],"version":"5.9.3"}
+{"root":["./src/App.tsx","./src/Teacher.tsx","./src/api.ts","./src/art.tsx","./src/game.ts","./src/main.tsx","./src/roster.ts","./src/sound.ts","./src/vite-env.d.ts","./src/live/Host.tsx","./src/live/Join.tsx","./src/live/backend.ts","./src/live/firebaseConfig.ts","./src/live/model.ts"],"version":"5.9.3"}

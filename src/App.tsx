@@ -30,7 +30,7 @@ const HINTS_PER_TEAM = 2
 const SOLO_SECONDS = 30
 
 /* ---------- Stage: fixed 1440×900 canvas scaled to fit any screen ---------- */
-function useStageScale() {
+export function useStageScale() {
   const [scale, setScale] = useState(1)
   useLayoutEffect(() => {
     const fit = () => setScale(Math.min(window.innerWidth / 1440, window.innerHeight / 900))
@@ -44,7 +44,7 @@ function useStageScale() {
 const pad2 = (n: number) => String(n).padStart(2, '0')
 
 /* ---------- Small reusable components ---------- */
-function IconButton({ label, icon, onClick }: { label: string; icon: Parameters<typeof Icon>[0]['name']; onClick: () => void }) {
+export function IconButton({ label, icon, onClick }: { label: string; icon: Parameters<typeof Icon>[0]['name']; onClick: () => void }) {
   return (
     <button className="icon-btn" onClick={onClick} aria-label={label} data-tip={label}>
       <Icon name={icon} />
@@ -52,11 +52,11 @@ function IconButton({ label, icon, onClick }: { label: string; icon: Parameters<
   )
 }
 
-function SoundButton({ on, toggle }: { on: boolean; toggle: () => void }) {
+export function SoundButton({ on, toggle }: { on: boolean; toggle: () => void }) {
   return <IconButton label={on ? 'Sound on' : 'Sound off'} icon={on ? 'sound' : 'mute'} onClick={toggle} />
 }
 
-function Bolts() {
+export function Bolts() {
   return (
     <>
       <i className="bolt tl" />
@@ -67,7 +67,7 @@ function Bolts() {
   )
 }
 
-function Meter({ label, value, max, segments = 10 }: { label: ReactNode; value: number; max: number; segments?: number }) {
+export function Meter({ label, value, max, segments = 10 }: { label: ReactNode; value: number; max: number; segments?: number }) {
   const lit = Math.round((value / max) * segments)
   return (
     <div className="meter meter-fuel">
@@ -93,7 +93,7 @@ function HintPips({ hints }: { hints: number }) {
   )
 }
 
-function TeamCard({ team, score, active, compact, hints }: { team: TeamId; score: number; active: boolean; compact?: boolean; hints?: number }) {
+export function TeamCard({ team, score, active, compact, hints }: { team: TeamId; score: number; active: boolean; compact?: boolean; hints?: number }) {
   return (
     <div className={`team-card team-${team} ${active ? 'active' : ''} ${compact ? 'compact' : ''}`}>
       <div className="team-avatar">
@@ -144,7 +144,7 @@ function PlayerCard({ name, cls, score, hints, compact }: { name: string; cls: s
   )
 }
 
-function Overlay({ children, onClose, wide }: { children: ReactNode; onClose?: () => void; wide?: boolean }) {
+export function Overlay({ children, onClose, wide }: { children: ReactNode; onClose?: () => void; wide?: boolean }) {
   return (
     <div className="overlay" onClick={onClose}>
       <div className={`glass modal ${wide ? 'wide' : ''}`} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
@@ -164,7 +164,7 @@ function BackButton({ onClick }: { onClick: () => void }) {
 }
 
 /* ---------- Screen 01: Main Menu ---------- */
-function MainMenu({ onSolo, onTeam, onHowTo }: { onSolo: () => void; onTeam: () => void; onHowTo: () => void }) {
+function MainMenu({ onSolo, onHowTo }: { onSolo: () => void; onHowTo: () => void }) {
   return (
     <div className="screen menu">
       <div className="nebula nebula-menu" />
@@ -199,12 +199,9 @@ function MainMenu({ onSolo, onTeam, onHowTo }: { onSolo: () => void; onTeam: () 
         <button className="btn btn-outline" onClick={onHowTo}>
           HOW TO PLAY
         </button>
-        <div className="teacher-row">
-          <span className="pill">Teacher</span>
-          <button className="link-btn" onClick={onTeam}>
-            Team mode (shared screen)
-          </button>
-        </div>
+        <a className="btn btn-ghost join-live-btn" href="/join">
+          JOIN A LIVE GAME
+        </a>
       </div>
     </div>
   )
@@ -1056,7 +1053,8 @@ export default function App() {
     }
   })
   const [howTo, setHowTo] = useState(false)
-  const [teamSetup, setTeamSetup] = useState(false)
+  // Team mode on one shared screen is opened from the teacher dashboard (/?mode=team)
+  const [teamSetup, setTeamSetup] = useState(() => new URLSearchParams(window.location.search).get('mode') === 'team')
   const [paused, setPaused] = useState(false)
   const [confirmMenu, setConfirmMenu] = useState(false)
   const [runId, setRunId] = useState(0)
@@ -1201,7 +1199,7 @@ export default function App() {
         <div key={warp} className="warp-in">
           {screen === 'menu' && (
             <>
-              <MainMenu onSolo={() => go(cls ? 'name' : 'class')} onTeam={() => setTeamSetup(true)} onHowTo={() => setHowTo(true)} />
+              <MainMenu onSolo={() => go(cls ? 'name' : 'class')} onHowTo={() => setHowTo(true)} />
               <div className="hud-right">
                 <SoundButton on={sound} toggle={toggleSound} />
               </div>

@@ -11,6 +11,10 @@ Students open the link, choose their class (or use `/?class=4A`), tap their name
 Results go to a Google Sheet through `apps-script/Code.gs`; the teacher dashboard is at `/teacher` (PIN set in the script).
 Class lists are in `src/roster.ts`. Set the Apps Script web app URL in `src/api.ts` or as `VITE_SCRIPT_URL` in Vercel.
 
+## Live games (phones)
+From the teacher dashboard: **Team turns** or **Race** opens `/host` for the chosen class. Students open `/join`, type the 6-digit code (or scan the QR) and tap their name.
+Needs a free Firebase Realtime Database: put the web config in `src/live/firebaseConfig.ts` and paste `firebase/database.rules.json` into the database's Rules tab.
+
 ## Run locally
 npm install
 npm run dev
