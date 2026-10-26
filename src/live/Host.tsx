@@ -56,6 +56,7 @@ export default function Host() {
 
   const [be, setBe] = useState<Backend | null>(null)
   const [code, setCode] = useState('')
+  const [openErr, setOpenErr] = useState('')
   const [meta, setMeta] = useState<Meta | null>(null)
   const [players, setPlayers] = useState<Record<string, Player>>({})
   const [st, setSt] = useState<QState | null>(null)
@@ -80,19 +81,27 @@ export default function Host() {
   useEffect(() => {
     if (!liveReady() || !CLASSES[cls]) return
     let cancelled = false
+    const slow = window.setTimeout(() => !cancelled && setOpenErr('The live game service is not answering.'), 15000)
     ;(async () => {
-      const b = await getBackend()
-      let c = newCode()
-      for (let i = 0; i < 5 && (await b.get(roomPath(c) + '/meta')); i++) c = newCode()
-      const m: Meta = { cls, mode, status: 'lobby', created: b.now() }
-      await b.set(roomPath(c), { meta: m })
-      if (cancelled) return
+      try {
+        const b = await getBackend()
+        let c = newCode()
+        for (let i = 0; i < 5 && (await b.get(roomPath(c) + '/meta')); i++) c = newCode()
+        const m: Meta = { cls, mode, status: 'lobby', created: b.now() }
+        await b.set(roomPath(c) + '/meta', m)
+        window.clearTimeout(slow)
+        if (cancelled) return
       setBe(b)
       setCode(c)
-      QRCode.toDataURL(`${joinUrl}?room=${c}`, { margin: 1, width: 440, color: { dark: '#090B24', light: '#F8FBFF' } }).then(setQr)
+        QRCode.toDataURL(`${joinUrl}?room=${c}`, { margin: 1, width: 440, color: { dark: '#090B24', light: '#F8FBFF' } }).then(setQr)
+      } catch (e) {
+        window.clearTimeout(slow)
+        if (!cancelled) setOpenErr(String((e as Error)?.message || e))
+      }
     })()
     return () => {
       cancelled = true
+      window.clearTimeout(slow)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -330,6 +339,13 @@ export default function Host() {
 
   if (!liveReady()) return stage(<SetupNeeded />)
   if (!CLASSES[cls]) return stage(<Message title="Choose a class first" text="Open live games from your teacher dashboard." />)
+  if (openErr && !code)
+    return stage(
+      <Message
+        title="Could not open a room"
+        text={`${openErr} — check that the Realtime Database exists and its Rules are published, then reload this page.`}
+      />,
+    )
   if (!code || !meta) return stage(<Message title="Opening a room…" text="Connecting to the live game service." />)
 
   const plist = sortedPlayers(players)
