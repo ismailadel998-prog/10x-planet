@@ -10,6 +10,13 @@ export const TEAMS: Record<TeamId, { name: string; short: string }> = {
 export const other = (t: TeamId): TeamId => (t === 'comets' ? 'rockets' : 'comets')
 
 export const MISSIONS = 8
+
+export const SKILLS = {
+  oneDigit: '1-digit × tens',
+  tensTens: 'Tens × tens',
+  twoDigit: '2-digit × tens',
+  missing: 'Missing factor',
+}
 export const MISSION_SECONDS = 20
 export const BOSS_SHIELDS = 5
 export const MISSION_POINTS = 200
@@ -21,6 +28,7 @@ export interface MissionQ {
   answer: number
   choices: number[]
   cue: string
+  skill: string
 }
 
 export interface BossQ {
@@ -57,7 +65,7 @@ function stripZeros(n: number): { core: number; zeros: number } {
   return { core, zeros }
 }
 
-function buildMission(a: number, b: number): MissionQ {
+function buildMission(a: number, b: number, skill = ''): MissionQ {
   const answer = a * b
   const A = stripZeros(a)
   const B = stripZeros(b)
@@ -79,7 +87,7 @@ function buildMission(a: number, b: number): MissionQ {
     const n = answer + rand(1, 9) * 10
     if (!distractors.includes(n) && n !== answer) distractors.push(n)
   }
-  return { a, b, answer, cue, choices: shuffle([answer, ...distractors]) }
+  return { a, b, answer, cue, skill, choices: shuffle([answer, ...distractors]) }
 }
 
 /** Worked steps shown after an answer, using the lesson's 3 steps */
@@ -95,26 +103,26 @@ export function makeMissions(): MissionQ[] {
   const tens = [20, 30, 40, 50, 60, 70, 80, 90]
   const used = new Set<string>(['30x40'])
   const out: MissionQ[] = []
-  const add = (gen: () => [number, number]) => {
+  const add = (skill: string, gen: () => [number, number]) => {
     for (let tries = 0; tries < 50; tries++) {
       const [a, b] = gen()
       const key = [a, b].sort().join('x')
       if (!used.has(key)) {
         used.add(key)
-        out.push(buildMission(a, b))
+        out.push(buildMission(a, b, skill))
         return
       }
     }
   }
   // Missions 1-2: one digit × a multiple of 10
-  for (let i = 0; i < 2; i++) add(() => (Math.random() < 0.5 ? [rand(3, 9), pick(tens)] : [pick(tens), rand(3, 9)]))
+  for (let i = 0; i < 2; i++) add(SKILLS.oneDigit, () => (Math.random() < 0.5 ? [rand(3, 9), pick(tens)] : [pick(tens), rand(3, 9)]))
   // Mission 3: the lesson example, 40 × 30
-  out.push(buildMission(40, 30))
+  out.push(buildMission(40, 30, SKILLS.tensTens))
   // Missions 4-5: multiple of 10 × multiple of 10
-  for (let i = 0; i < 2; i++) add(() => [pick(tens), pick(tens)])
+  for (let i = 0; i < 2; i++) add(SKILLS.tensTens, () => [pick(tens), pick(tens)])
   // Missions 6-8: two-digit × multiple of 10 (e.g. 23 × 30)
   for (let i = 0; i < 3; i++)
-    add(() => {
+    add(SKILLS.twoDigit, () => {
       let a = rand(12, 49)
       if (a % 10 === 0) a += 1
       return [a, pick([20, 30, 40])]

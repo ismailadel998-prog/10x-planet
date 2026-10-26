@@ -1736,3 +1736,250 @@ kbd {
     animation-iteration-count: 1 !important;
   }
 }
+
+/* ===== Solo mode: menu, pickers, player HUD, results ===== */
+.teacher-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+.teacher-row .link-btn {
+  font-size: 18px;
+}
+.hud-back {
+  position: absolute;
+  top: 32px;
+  left: 80px;
+  z-index: 5;
+}
+.picker-head {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 120px;
+  text-align: center;
+}
+.picker-head.small {
+  top: 36px;
+}
+.picker-title {
+  font-size: 64px;
+  line-height: 70px;
+}
+.class-cards {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 340px;
+  display: flex;
+  justify-content: center;
+  gap: 48px;
+}
+.class-card {
+  width: 360px;
+  height: 360px;
+  border-radius: var(--r-card);
+  border: 3px solid var(--c);
+  background: var(--panel);
+  color: var(--white);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  box-shadow:
+    var(--panel-shadow),
+    0 0 36px color-mix(in srgb, var(--c) 35%, transparent);
+  transition: transform 0.18s;
+}
+.class-card.cyan {
+  --c: var(--cyan-500);
+}
+.class-card.orange {
+  --c: var(--orange-500);
+}
+.class-card:hover {
+  transform: translateY(-6px) scale(1.02);
+}
+.class-grade {
+  font-weight: 800;
+  font-size: 24px;
+  letter-spacing: 0.2em;
+  color: var(--lavender-200);
+}
+.class-id {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 150px;
+  line-height: 150px;
+  color: var(--c);
+  text-shadow: 0 6px 0 #0c0e30;
+}
+.class-count {
+  font-weight: 700;
+  font-size: 22px;
+  color: var(--lavender-200);
+}
+.name-grid {
+  position: absolute;
+  left: 120px;
+  right: 120px;
+  top: 180px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px 16px;
+}
+.name-btn {
+  height: 92px;
+  border-radius: var(--r-ctl);
+  border: 2px solid rgba(168, 118, 255, 0.5);
+  background: linear-gradient(180deg, #23286a, #171b4c);
+  color: var(--white);
+  font-weight: 800;
+  font-size: 25px;
+  line-height: 28px;
+  padding: 0 14px;
+  display: grid;
+  place-items: center;
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.1),
+    0 5px 0 #0a0c2a;
+  transition:
+    transform 0.15s,
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+.name-btn.ar {
+  font-size: 28px;
+}
+.name-btn:not(:disabled):hover {
+  transform: translateY(-3px);
+  border-color: var(--cyan-500);
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.15),
+    0 8px 0 #0a0c2a,
+    var(--glow-cyan);
+}
+.name-btn:disabled {
+  opacity: 0.6;
+}
+.spinner {
+  display: inline-block;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 4px solid rgba(168, 245, 255, 0.25);
+  border-top-color: var(--cyan-500);
+  animation: spin 0.8s linear infinite;
+  vertical-align: middle;
+}
+.modal-title.center {
+  text-align: center;
+}
+.hl {
+  color: var(--yellow-400);
+}
+.modal .team-select {
+  width: 100%;
+}
+
+/* player card (solo HUD) */
+.score-rail.solo {
+  justify-content: center;
+}
+.player-card {
+  width: 520px;
+  opacity: 1 !important;
+}
+.player-card.compact {
+  width: 280px;
+}
+.player-name {
+  font-weight: 900;
+  font-size: 26px;
+  line-height: 30px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 260px;
+}
+.player-card.compact .player-name {
+  max-width: 230px;
+}
+.player-score {
+  margin-left: auto;
+  text-align: right;
+}
+.player-score small {
+  display: block;
+  font-weight: 800;
+  font-size: 14px;
+  letter-spacing: 0.1em;
+  color: var(--lavender-200);
+}
+.player-score b {
+  font-weight: 900;
+  font-size: 34px;
+  color: var(--yellow-400);
+  font-variant-numeric: tabular-nums;
+}
+.player-card.compact .player-score {
+  margin-left: 0;
+  text-align: left;
+}
+
+/* solo results */
+.solo-podium {
+  align-items: center;
+}
+.solo-name {
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 44px;
+  line-height: 48px;
+  text-align: center;
+}
+.solo-name span {
+  color: var(--lavender-200);
+  font-size: 30px;
+}
+.star-row {
+  display: flex;
+  gap: 14px;
+  justify-content: center;
+}
+.star path {
+  fill: var(--space-800);
+  stroke: rgba(217, 216, 255, 0.35);
+  stroke-width: 1.2;
+}
+.star.on path {
+  fill: var(--yellow-400);
+  stroke: #8a5a00;
+  filter: drop-shadow(0 0 8px rgba(255, 212, 77, 0.6));
+}
+.solo-podium .summary-row {
+  width: 100%;
+}
+.save-line {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  font-weight: 800;
+  font-size: 20px;
+  color: var(--lavender-200);
+  min-height: 34px;
+}
+.save-saved {
+  color: var(--green-500);
+}
+.save-failed {
+  color: #ff9aa6;
+}
+.save-failed .link-btn {
+  color: var(--cyan-200);
+  font-size: 20px;
+}

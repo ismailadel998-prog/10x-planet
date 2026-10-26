@@ -5,6 +5,7 @@ import {
   MISSION_POINTS,
   MISSION_SECONDS,
   MISSIONS,
+  SKILLS,
   TEAMS,
   fmt,
   lessonBossQs,
@@ -18,11 +19,15 @@ import {
 } from './game'
 import { Asteroid, CaptainNull, Chest, Crystal, Icon, Planet, Ship, Sparkle, Stars } from './art'
 import { setSound, sfx } from './sound'
+import { CLASSES, CLASS_IDS, isArabic } from './roster'
+import { checkPlayed, connected, finishAttempt, resendPending, startAttempt, type Rec } from './api'
 
-type Screen = 'menu' | 'mission' | 'boss' | 'victory'
+type Screen = 'menu' | 'class' | 'name' | 'mission' | 'boss' | 'victory' | 'solo-results'
+type Mode = 'team' | 'solo'
 type Scores = Record<TeamId, number>
 
 const HINTS_PER_TEAM = 2
+const SOLO_SECONDS = 30
 
 /* ---------- Stage: fixed 1440×900 canvas scaled to fit any screen ---------- */
 function useStageScale() {
@@ -51,16 +56,39 @@ function SoundButton({ on, toggle }: { on: boolean; toggle: () => void }) {
   return <IconButton label={on ? 'Sound on' : 'Sound off'} icon={on ? 'sound' : 'mute'} onClick={toggle} />
 }
 
-function Meter({ label, value, max, segments = 10, variant = 'fuel' }: { label: ReactNode; value: number; max: number; segments?: number; variant?: 'fuel' | 'progress' | 'health' }) {
+function Bolts() {
+  return (
+    <>
+      <i className="bolt tl" />
+      <i className="bolt tr" />
+      <i className="bolt bl" />
+      <i className="bolt br" />
+    </>
+  )
+}
+
+function Meter({ label, value, max, segments = 10 }: { label: ReactNode; value: number; max: number; segments?: number }) {
   const lit = Math.round((value / max) * segments)
   return (
-    <div className={`meter meter-${variant}`}>
+    <div className="meter meter-fuel">
       <div className="meter-label">{label}</div>
       <div className="meter-track">
         {Array.from({ length: segments }, (_, i) => (
-          <span key={i} className={i < lit ? 'seg on' : 'seg'} style={{ ['--i' as string]: i }} />
+          <span key={i} className={i < lit ? 'seg on' : 'seg'} />
         ))}
       </div>
+    </div>
+  )
+}
+
+function HintPips({ hints }: { hints: number }) {
+  return (
+    <div className="powerups" aria-label={`${hints} hints left`}>
+      {Array.from({ length: HINTS_PER_TEAM }, (_, i) => (
+        <span key={i} className={i < hints ? 'pu on' : 'pu'}>
+          <Icon name="crystal" size={16} />
+        </span>
+      ))}
     </div>
   )
 }
@@ -84,17 +112,34 @@ function TeamCard({ team, score, active, compact, hints }: { team: TeamId; score
       <div className="team-info">
         <div className="team-name">{TEAMS[team].name}</div>
         <div className="team-score">{fmt(score)}</div>
-        {hints !== undefined && (
-          <div className="powerups" aria-label={`${hints} hints left`}>
-            {Array.from({ length: HINTS_PER_TEAM }, (_, i) => (
-              <span key={i} className={i < hints ? 'pu on' : 'pu'}>
-                <Icon name="crystal" size={16} />
-              </span>
-            ))}
-          </div>
-        )}
+        {hints !== undefined && <HintPips hints={hints} />}
       </div>
       {active && <div className="turn-tag">YOUR TURN</div>}
+    </div>
+  )
+}
+
+/** Solo player HUD card */
+function PlayerCard({ name, cls, score, hints, compact }: { name: string; cls: string; score: number; hints?: number; compact?: boolean }) {
+  return (
+    <div className={`team-card team-comets active player-card ${compact ? 'compact' : ''}`}>
+      <div className="team-avatar">
+        <Icon name="rocket" size={30} />
+        <span className="orbit" />
+      </div>
+      <div className="team-info">
+        <div className="team-name">
+          PILOT · {cls}
+        </div>
+        <div className="player-name" dir="auto">
+          {name}
+        </div>
+        {hints !== undefined && <HintPips hints={hints} />}
+      </div>
+      <div className="player-score">
+        <small>SCORE</small>
+        <b>{fmt(score)}</b>
+      </div>
     </div>
   )
 }
@@ -103,18 +148,23 @@ function Overlay({ children, onClose, wide }: { children: ReactNode; onClose?: (
   return (
     <div className="overlay" onClick={onClose}>
       <div className={`glass modal ${wide ? 'wide' : ''}`} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true">
-        <i className="bolt tl" />
-        <i className="bolt tr" />
-        <i className="bolt bl" />
-        <i className="bolt br" />
+        <Bolts />
         {children}
       </div>
     </div>
   )
 }
 
+function BackButton({ onClick }: { onClick: () => void }) {
+  return (
+    <div className="hud-back">
+      <IconButton label="Back" icon="back" onClick={onClick} />
+    </div>
+  )
+}
+
 /* ---------- Screen 01: Main Menu ---------- */
-function MainMenu({ starter, setStarter, onPlay, onHowTo }: { starter: TeamId; setStarter: (t: TeamId) => void; onPlay: () => void; onHowTo: () => void }) {
+function MainMenu({ onSolo, onTeam, onHowTo }: { onSolo: () => void; onTeam: () => void; onHowTo: () => void }) {
   return (
     <div className="screen menu">
       <div className="nebula nebula-menu" />
@@ -141,43 +191,137 @@ function MainMenu({ starter, setStarter, onPlay, onHowTo }: { starter: TeamId; s
       </div>
 
       <div className="glass mission-card">
-        <i className="bolt tl" />
-        <i className="bolt tr" />
-        <i className="bolt bl" />
-        <i className="bolt br" />
+        <Bolts />
         <p className="story">Your ship is stuck on Planet 10X! Multiply by multiples of 10 to power the ship. Beat Captain Null. Escape!</p>
-        <div className="setup-row">
-          <span className="pill">Quick setup</span>
-          <span className="helper">Choose who starts</span>
-        </div>
-        <div className="team-select">
-          {(['comets', 'rockets'] as TeamId[]).map((t) => (
-            <button
-              key={t}
-              className={`team-pick team-${t} ${starter === t ? 'selected' : ''}`}
-              onClick={() => {
-                sfx.click()
-                setStarter(t)
-              }}
-              aria-pressed={starter === t}
-            >
-              <span className="team-pick-name">{TEAMS[t].name}</span>
-              <span className="team-pick-sub">{starter === t ? 'Starts first' : 'Goes second'}</span>
-              {starter === t && (
-                <span className="check-badge">
-                  <Icon name="check" size={18} />
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
-        <button className="btn btn-primary btn-lg" onClick={onPlay}>
-          <Icon name="rocket" size={30} /> PLAY GAME
+        <button className="btn btn-primary btn-lg" onClick={onSolo}>
+          <Icon name="rocket" size={30} /> START MY MISSION
         </button>
         <button className="btn btn-outline" onClick={onHowTo}>
           HOW TO PLAY
         </button>
+        <div className="teacher-row">
+          <span className="pill">Teacher</span>
+          <button className="link-btn" onClick={onTeam}>
+            Team mode (shared screen)
+          </button>
+        </div>
       </div>
+    </div>
+  )
+}
+
+/* ---------- Solo: pick class ---------- */
+function ClassPick({ onPick, onBack }: { onPick: (c: string) => void; onBack: () => void }) {
+  return (
+    <div className="screen picker">
+      <div className="nebula nebula-menu" />
+      <Stars seed={5} />
+      <BackButton onClick={onBack} />
+      <div className="picker-head">
+        <div className="eyebrow">STEP 1 OF 2</div>
+        <h1 className="title picker-title">WHICH CLASS ARE YOU IN?</h1>
+      </div>
+      <div className="class-cards">
+        {CLASS_IDS.map((c, i) => (
+          <button
+            key={c}
+            className={`class-card ${i % 2 ? 'orange' : 'cyan'}`}
+            onClick={() => {
+              sfx.click()
+              onPick(c)
+            }}
+          >
+            <span className="class-grade">GRADE</span>
+            <span className="class-id">{c}</span>
+            <span className="class-count">{CLASSES[c].length} pilots</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/* ---------- Solo: pick name ---------- */
+function NamePick({ cls, onBack, onConfirm }: { cls: string; onBack: () => void; onConfirm: (name: string) => void }) {
+  const [chosen, setChosen] = useState<string | null>(null)
+  const [checking, setChecking] = useState<string | null>(null)
+  const [blocked, setBlocked] = useState<string | null>(null)
+  const [starting, setStarting] = useState(false)
+  const names = CLASSES[cls] || []
+
+  const tap = async (name: string) => {
+    if (checking) return
+    sfx.click()
+    setChecking(name)
+    const played = await checkPlayed(cls, name)
+    setChecking(null)
+    if (played) setBlocked(name)
+    else setChosen(name)
+  }
+
+  const go = async () => {
+    if (!chosen || starting) return
+    setStarting(true)
+    const ok = await startAttempt(cls, chosen)
+    setStarting(false)
+    if (!ok) {
+      setBlocked(chosen)
+      setChosen(null)
+      return
+    }
+    onConfirm(chosen)
+  }
+
+  return (
+    <div className="screen picker">
+      <div className="nebula nebula-menu" />
+      <Stars seed={9} />
+      <BackButton onClick={onBack} />
+      <div className="picker-head small">
+        <div className="eyebrow">STEP 2 OF 2 · CLASS {cls}</div>
+        <h1 className="title picker-title">TAP YOUR NAME</h1>
+      </div>
+      <div className="name-grid">
+        {names.map((n) => (
+          <button key={n} className={`name-btn ${isArabic(n) ? 'ar' : ''}`} dir="auto" onClick={() => tap(n)} disabled={!!checking}>
+            {checking === n ? <span className="spinner" /> : n}
+          </button>
+        ))}
+      </div>
+
+      {chosen && (
+        <Overlay onClose={() => !starting && setChosen(null)}>
+          <div className="eyebrow">CLASS {cls}</div>
+          <h2 className="modal-title center">
+            Are you{' '}
+            <span className="hl" dir="auto">
+              {chosen}
+            </span>
+            ?
+          </h2>
+          <p className="modal-text">You can play this mission one time. Get ready!</p>
+          <div className="modal-actions row">
+            <button className="btn btn-outline" onClick={() => setChosen(null)} disabled={starting}>
+              NO, GO BACK
+            </button>
+            <button className="btn btn-primary" onClick={go} disabled={starting}>
+              {starting ? 'LOADING…' : 'YES, START!'}
+            </button>
+          </div>
+        </Overlay>
+      )}
+
+      {blocked && (
+        <Overlay onClose={() => setBlocked(null)}>
+          <h2 className="modal-title center">Mission already played</h2>
+          <p className="modal-text">
+            <span dir="auto">{blocked}</span> has already played this mission. If you need another try, ask your teacher.
+          </p>
+          <button className="btn btn-primary" onClick={() => setBlocked(null)}>
+            OK
+          </button>
+        </Overlay>
+      )}
     </div>
   )
 }
@@ -186,18 +330,9 @@ function MainMenu({ starter, setStarter, onPlay, onHowTo }: { starter: TeamId; s
 type Phase = 'ask' | 'locked' | 'feedback'
 type Result = 'correct' | 'wrong' | 'timeout' | 'revealed'
 
-function Mission({
-  turn,
-  setTurn,
-  scores,
-  addPoints,
-  paused,
-  onPause,
-  sound,
-  toggleSound,
-  onDone,
-  runId,
-}: {
+interface PlayProps {
+  mode: Mode
+  player: { cls: string; name: string } | null
   turn: TeamId
   setTurn: (t: TeamId) => void
   scores: Scores
@@ -206,15 +341,20 @@ function Mission({
   onPause: () => void
   sound: boolean
   toggleSound: () => void
-  onDone: (correct: number) => void
+  onRecord: (r: Rec) => void
   runId: number
-}) {
+}
+
+function Mission(props: PlayProps & { onDone: (correct: number) => void }) {
+  const { mode, player, turn, setTurn, scores, addPoints, paused, onPause, sound, toggleSound, onDone, onRecord, runId } = props
+  const solo = mode === 'solo'
+  const seconds = solo ? SOLO_SECONDS : MISSION_SECONDS
   const [missions, setMissions] = useState<MissionQ[]>(() => makeMissions())
   const [idx, setIdx] = useState(0)
   const [phase, setPhase] = useState<Phase>('ask')
   const [selected, setSelected] = useState<number | null>(null)
   const [result, setResult] = useState<Result | null>(null)
-  const [time, setTime] = useState(MISSION_SECONDS)
+  const [time, setTime] = useState(seconds)
   const [correctCount, setCorrectCount] = useState(0)
   const [fuelPulse, setFuelPulse] = useState(false)
   const [showCue, setShowCue] = useState(false)
@@ -225,12 +365,13 @@ function Mission({
     setPhase('ask')
     setSelected(null)
     setResult(null)
-    setTime(MISSION_SECONDS)
+    setTime(seconds)
     setCorrectCount(0)
     setShowCue(false)
-  }, [runId])
+  }, [runId, seconds])
 
   const q = missions[idx]
+  const qText = q ? `${fmt(q.a)} × ${fmt(q.b)}` : ''
 
   // countdown
   useEffect(() => {
@@ -239,6 +380,7 @@ function Mission({
       setResult('timeout')
       setPhase('feedback')
       sfx.wrong()
+      onRecord({ kind: 'mission', skill: q.skill, q: qText, answer: null, correct: q.answer, ok: false })
       return
     }
     const id = window.setTimeout(() => {
@@ -246,6 +388,7 @@ function Mission({
       if (time <= 4) sfx.tick()
     }, 1000)
     return () => window.clearTimeout(id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, paused, time])
 
   const choose = useCallback(
@@ -258,6 +401,7 @@ function Mission({
         const ok = choice === q.answer
         setResult(ok ? 'correct' : 'wrong')
         setPhase('feedback')
+        onRecord({ kind: 'mission', skill: q.skill, q: qText, answer: choice, correct: q.answer, ok })
         if (ok) {
           sfx.correct()
           addPoints(turn, MISSION_POINTS)
@@ -267,13 +411,14 @@ function Mission({
         } else sfx.wrong()
       }, 650)
     },
-    [phase, paused, q, turn, addPoints],
+    [phase, paused, q, qText, turn, addPoints, onRecord],
   )
 
   const reveal = () => {
     if (phase !== 'ask') return
     setResult('revealed')
     setPhase('feedback')
+    onRecord({ kind: 'mission', skill: q.skill, q: qText, answer: null, correct: q.answer, ok: false })
   }
 
   const next = useCallback(() => {
@@ -287,10 +432,10 @@ function Mission({
     setPhase('ask')
     setSelected(null)
     setResult(null)
-    setTime(MISSION_SECONDS)
+    setTime(seconds)
     setShowCue(false)
-    setTurn(other(turn))
-  }, [phase, idx, correctCount, onDone, setTurn, turn])
+    if (!solo) setTurn(other(turn))
+  }, [phase, idx, correctCount, onDone, setTurn, turn, seconds, solo])
 
   // keyboard: 1-4 / A-D to answer, Enter for next
   useEffect(() => {
@@ -340,7 +485,7 @@ function Mission({
       <div className={`timer timer-${timerColor} ${phase !== 'ask' ? 'stopped' : ''}`} aria-label={`${time} seconds left`}>
         <svg viewBox="0 0 104 104" width="104" height="104">
           <circle cx="52" cy="52" r="44" className="timer-track" />
-          <circle cx="52" cy="52" r="44" className="timer-fill" strokeDasharray={C} strokeDashoffset={C * (1 - time / MISSION_SECONDS)} transform="rotate(-90 52 52)" />
+          <circle cx="52" cy="52" r="44" className="timer-fill" strokeDasharray={C} strokeDashoffset={C * (1 - time / seconds)} transform="rotate(-90 52 52)" />
         </svg>
         <span>{time}</span>
       </div>
@@ -350,9 +495,15 @@ function Mission({
       </div>
 
       {/* Score rail */}
-      <div className="score-rail">
-        <TeamCard team="comets" score={scores.comets} active={turn === 'comets'} />
-        <TeamCard team="rockets" score={scores.rockets} active={turn === 'rockets'} />
+      <div className={`score-rail ${solo ? 'solo' : ''}`}>
+        {solo && player ? (
+          <PlayerCard name={player.name} cls={player.cls} score={scores.comets} />
+        ) : (
+          <>
+            <TeamCard team="comets" score={scores.comets} active={turn === 'comets'} />
+            <TeamCard team="rockets" score={scores.rockets} active={turn === 'rockets'} />
+          </>
+        )}
       </div>
 
       {/* Question */}
@@ -408,7 +559,7 @@ function Mission({
       {/* Feedback banner */}
       {phase === 'feedback' && (
         <div className={`feedback-banner fb-${result}`}>
-          {result === 'correct' && <>+{MISSION_POINTS} FUEL POINTS · {TEAMS[turn].short}!</>}
+          {result === 'correct' && <>+{MISSION_POINTS} FUEL POINTS{solo ? '!' : ` · ${TEAMS[turn].short}!`}</>}
           {result === 'wrong' && <>Not quite — the answer is {fmt(q.answer)}</>}
           {result === 'timeout' && <>Time's up! The answer is {fmt(q.answer)}</>}
           {result === 'revealed' && <>Answer: {fmt(q.answer)}</>}
@@ -428,9 +579,11 @@ function Mission({
         />
       </div>
       <div className="teacher-controls">
-        <button className="link-btn" onClick={reveal} disabled={phase !== 'ask'}>
-          Reveal answer
-        </button>
+        {!solo && (
+          <button className="link-btn" onClick={reveal} disabled={phase !== 'ask'}>
+            Reveal answer
+          </button>
+        )}
         <button className="btn btn-primary btn-next" onClick={next} disabled={phase !== 'feedback'}>
           {idx + 1 >= MISSIONS ? 'FACE THE BOSS' : 'NEXT MISSION'} <span className="arrow">→</span>
         </button>
@@ -440,31 +593,13 @@ function Mission({
 }
 
 /* ---------- Screen 03: Final Boss ---------- */
-function Boss({
-  turn,
-  setTurn,
-  scores,
-  addPoints,
-  paused,
-  onPause,
-  sound,
-  toggleSound,
-  onWin,
-  runId,
-}: {
-  turn: TeamId
-  setTurn: (t: TeamId) => void
-  scores: Scores
-  addPoints: (t: TeamId, n: number) => void
-  paused: boolean
-  onPause: () => void
-  sound: boolean
-  toggleSound: () => void
-  onWin: () => void
-  runId: number
-}) {
+function Boss(props: PlayProps & { onFinish: (shieldsLeft: number, correct: number, hintsUsed: number) => void }) {
+  const { mode, player, turn, setTurn, scores, addPoints, paused, onPause, sound, toggleSound, onFinish, onRecord, runId } = props
+  const solo = mode === 'solo'
   const [queue, setQueue] = useState<BossQ[]>(() => lessonBossQs())
+  const [asked, setAsked] = useState(1)
   const [shields, setShields] = useState(BOSS_SHIELDS)
+  const [correct, setCorrect] = useState(0)
   const [value, setValue] = useState('')
   const [hintOpen, setHintOpen] = useState(false)
   const [hints, setHints] = useState<Record<TeamId, number>>({ comets: HINTS_PER_TEAM, rockets: HINTS_PER_TEAM })
@@ -475,7 +610,9 @@ function Boss({
 
   useEffect(() => {
     setQueue(lessonBossQs())
+    setAsked(1)
     setShields(BOSS_SHIELDS)
+    setCorrect(0)
     setValue('')
     setHintOpen(false)
     setHints({ comets: HINTS_PER_TEAM, rockets: HINTS_PER_TEAM })
@@ -483,6 +620,8 @@ function Boss({
   }, [runId])
 
   const q = queue[0]
+  // Solo: everyone gets the same 5 lesson questions, then the game ends.
+  const lastQuestion = solo ? asked >= BOSS_SHIELDS : false
 
   useEffect(() => {
     if (!result && !paused) inputRef.current?.focus()
@@ -491,10 +630,14 @@ function Boss({
   const submit = () => {
     if (result || paused || value.trim() === '') return
     const n = Number(value.replace(/,/g, ''))
-    if (n === q.answer) {
+    const ok = n === q.answer
+    const qText = `${q.left === null ? '?' : fmt(q.left)} × ${q.right === null ? '?' : fmt(q.right)} = ${fmt(q.product)}`
+    onRecord({ kind: 'boss', skill: SKILLS.missing, q: qText, answer: n, correct: q.answer, ok, hint: hintOpen })
+    if (ok) {
       sfx.shield()
       setResult('correct')
       setShields((s) => s - 1)
+      setCorrect((c) => c + 1)
       addPoints(turn, BOSS_POINTS)
       setHit(true)
       window.setTimeout(() => setHit(false), 700)
@@ -506,21 +649,25 @@ function Boss({
     }
   }
 
+  const hintsUsed = HINTS_PER_TEAM * 2 - hints.comets - hints.rockets
+  const finished = shields <= 0 || lastQuestion
+
   const next = () => {
     if (!result) return
     sfx.click()
-    if (shields <= 0) {
-      onWin()
+    if (finished) {
+      onFinish(shields, correct, hintsUsed)
       return
     }
     setQueue((qs) => {
       const rest = qs.slice(1)
       return rest.length ? rest : [makeBossQ()]
     })
+    setAsked((a) => a + 1)
     setValue('')
     setHintOpen(false)
     setResult(null)
-    setTurn(other(turn))
+    if (!solo) setTurn(other(turn))
   }
 
   const useHint = () => {
@@ -542,6 +689,7 @@ function Boss({
 
   if (!q) return null
   const box = <span className={`missing ${result === 'correct' ? 'ok' : ''}`}>{result ? fmt(q.answer) : '?'}</span>
+  const nextLabel = finished ? (shields <= 0 ? 'ESCAPE THE PLANET!' : 'FINISH MISSION') : 'NEXT CHALLENGE'
 
   return (
     <div className="screen boss">
@@ -568,7 +716,7 @@ function Boss({
         </div>
         <div className="boss-bar-wrap">
           <div className="boss-bar-label">
-            <span>CAPTAIN NULL</span>
+            <span>CAPTAIN NULL{solo ? ` · CHALLENGE ${asked} / ${BOSS_SHIELDS}` : ''}</span>
             <span>
               {shields} / {BOSS_SHIELDS} SHIELDS
             </span>
@@ -590,15 +738,23 @@ function Boss({
         <CaptainNull width={400} hit={hit} />
       </div>
 
-      <div className="boss-team left">
-        <TeamCard team="comets" score={scores.comets} active={turn === 'comets'} compact hints={hints.comets} />
-      </div>
-      <div className="boss-team right">
-        <TeamCard team="rockets" score={scores.rockets} active={turn === 'rockets'} compact hints={hints.rockets} />
-      </div>
+      {solo && player ? (
+        <div className="boss-team left">
+          <PlayerCard name={player.name} cls={player.cls} score={scores.comets} hints={hints.comets} compact />
+        </div>
+      ) : (
+        <>
+          <div className="boss-team left">
+            <TeamCard team="comets" score={scores.comets} active={turn === 'comets'} compact hints={hints.comets} />
+          </div>
+          <div className="boss-team right">
+            <TeamCard team="rockets" score={scores.rockets} active={turn === 'rockets'} compact hints={hints.rockets} />
+          </div>
+        </>
+      )}
 
       {/* Challenge */}
-      <div className={`glass challenge-card ${shake ? 'shake' : ''}`} key={q.product + '-' + q.answer + '-' + shields}>
+      <div className={`glass challenge-card ${shake ? 'shake' : ''}`} key={q.product + '-' + q.answer + '-' + asked}>
         <div className="q-label violet">FINAL CHALLENGE • MISSING FACTOR</div>
         <div className="equation boss-eq">
           {q.left === null ? box : fmt(q.left)} × {q.right === null ? box : fmt(q.right)} = {fmt(q.product)}
@@ -637,14 +793,15 @@ function Boss({
             </>
           ) : (
             <button className="btn btn-primary btn-wide" onClick={next}>
-              {shields <= 0 ? 'ESCAPE THE PLANET!' : 'NEXT CHALLENGE'} <span className="arrow">→</span>
+              {nextLabel} <span className="arrow">→</span>
             </button>
           )}
         </div>
         <div className="boss-foot">
           {result === 'correct' ? (
             <div className="fb-line ok">
-              <Icon name="check" size={22} /> SHIELD DOWN! +{BOSS_POINTS} for {TEAMS[turn].short}
+              <Icon name="check" size={22} /> SHIELD DOWN! +{BOSS_POINTS}
+              {solo ? '' : ` for ${TEAMS[turn].short}`}
             </div>
           ) : result === 'wrong' ? (
             <div className="fb-line bad">
@@ -665,10 +822,8 @@ function Boss({
   )
 }
 
-/* ---------- Screen 04: Victory ---------- */
-function Victory({ scores, missionsCorrect, onAgain, onMenu, sound, toggleSound }: { scores: Scores; missionsCorrect: number; onAgain: () => void; onMenu: () => void; sound: boolean; toggleSound: () => void }) {
-  const ranked = (['comets', 'rockets'] as TeamId[]).sort((a, b) => scores[b] - scores[a])
-  const tie = scores.comets === scores.rockets
+/* ---------- Celebration backdrop shared by results screens ---------- */
+function Celebration({ party }: { party: boolean }) {
   const confetti = useRef(
     Array.from({ length: 46 }, (_, i) => {
       const side = i % 2 === 0
@@ -681,9 +836,8 @@ function Victory({ scores, missionsCorrect, onAgain, onMenu, sound, toggleSound 
       }
     }),
   ).current
-
   return (
-    <div className="screen victory">
+    <>
       <div className="nebula nebula-victory" />
       <Stars count={120} seed={11} />
       <div className="portal" />
@@ -693,11 +847,13 @@ function Victory({ scores, missionsCorrect, onAgain, onMenu, sound, toggleSound 
       <div className="victory-ship">
         <Ship width={260} />
       </div>
-      <div className="confetti" aria-hidden>
-        {confetti.map((c, i) => (
-          <span key={i} className={`cf cf${c.shape}`} style={{ left: c.x, background: c.color, animationDelay: `${c.delay}s`, animationDuration: `${c.dur}s` }} />
-        ))}
-      </div>
+      {party && (
+        <div className="confetti" aria-hidden>
+          {confetti.map((c, i) => (
+            <span key={i} className={`cf cf${c.shape}`} style={{ left: c.x, background: c.color, animationDelay: `${c.delay}s`, animationDuration: `${c.dur}s` }} />
+          ))}
+        </div>
+      )}
       <svg className="layer" viewBox="0 0 1440 900" aria-hidden>
         <Sparkle x={150} y={160} s={1.6} />
         <Sparkle x={1290} y={210} s={1.2} color="#A8F5FF" />
@@ -710,6 +866,18 @@ function Victory({ scores, missionsCorrect, onAgain, onMenu, sound, toggleSound 
       <div className="victory-chest right">
         <Chest size={90} />
       </div>
+    </>
+  )
+}
+
+/* ---------- Screen 04: Victory (team) ---------- */
+function Victory({ scores, missionsCorrect, onAgain, onMenu, sound, toggleSound }: { scores: Scores; missionsCorrect: number; onAgain: () => void; onMenu: () => void; sound: boolean; toggleSound: () => void }) {
+  const ranked = (['comets', 'rockets'] as TeamId[]).sort((a, b) => scores[b] - scores[a])
+  const tie = scores.comets === scores.rockets
+
+  return (
+    <div className="screen victory">
+      <Celebration party />
       <div className="hud-right">
         <SoundButton on={sound} toggle={toggleSound} />
       </div>
@@ -720,10 +888,7 @@ function Victory({ scores, missionsCorrect, onAgain, onMenu, sound, toggleSound 
       </div>
 
       <div className="glass podium">
-        <i className="bolt tl" />
-        <i className="bolt tr" />
-        <i className="bolt bl" />
-        <i className="bolt br" />
+        <Bolts />
         {tie && <div className="tie-tag">IT'S A TIE — BOTH TEAMS WIN!</div>}
         {ranked.map((t, i) => (
           <div key={t} className={`rank-row team-${t} ${i === 0 || tie ? 'winner' : ''}`}>
@@ -764,14 +929,125 @@ function Victory({ scores, missionsCorrect, onAgain, onMenu, sound, toggleSound 
   )
 }
 
+/* ---------- Solo results ---------- */
+type SaveState = 'saving' | 'saved' | 'failed' | 'offline'
+
+function SoloResults({
+  player,
+  score,
+  missionsCorrect,
+  bossCorrect,
+  shieldsLeft,
+  save,
+  onRetrySave,
+  onDone,
+  sound,
+  toggleSound,
+}: {
+  player: { cls: string; name: string }
+  score: number
+  missionsCorrect: number
+  bossCorrect: number
+  shieldsLeft: number
+  save: SaveState
+  onRetrySave: () => void
+  onDone: () => void
+  sound: boolean
+  toggleSound: () => void
+}) {
+  const won = shieldsLeft <= 0
+  const total = missionsCorrect + bossCorrect
+  const stars = total >= 12 ? 3 : total >= 9 ? 2 : total >= 5 ? 1 : 0
+  return (
+    <div className="screen victory">
+      <Celebration party={won || total >= 9} />
+      <div className="hud-right">
+        <SoundButton on={sound} toggle={toggleSound} />
+      </div>
+      <div className="victory-head">
+        <div className="eyebrow yellow">{won ? 'GALAXY SAVED!' : 'GREAT EFFORT, PILOT!'}</div>
+        <h1 className="title victory-title">{won ? 'MISSION COMPLETE' : 'YOU ESCAPED!'}</h1>
+      </div>
+
+      <div className="glass podium solo-podium">
+        <Bolts />
+        <div className="solo-name" dir="auto">
+          {player.name} <span>· {player.cls}</span>
+        </div>
+        <div className="star-row" aria-label={`${stars} of 3 stars`}>
+          {[0, 1, 2].map((i) => (
+            <svg key={i} viewBox="0 0 24 24" width="56" height="56" className={i < stars ? 'star on' : 'star'} aria-hidden>
+              <path d="M12 2l3 6.5 7 .8-5.2 4.8 1.4 7L12 17.6 5.8 21.1l1.4-7L2 9.3l7-.8z" />
+            </svg>
+          ))}
+        </div>
+        <div className="summary-row">
+          <div>
+            <small>SCORE</small>
+            <b>{fmt(score)}</b>
+          </div>
+          <div>
+            <small>MISSIONS</small>
+            <b>
+              {missionsCorrect} / {MISSIONS}
+            </b>
+          </div>
+          <div>
+            <small>BOSS SHIELDS</small>
+            <b>
+              {bossCorrect} / {BOSS_SHIELDS}
+            </b>
+          </div>
+        </div>
+        <div className="reinforce">{won ? 'You beat Captain Null! Multiples of 10 mastered!' : `Captain Null escaped with ${shieldsLeft} shield${shieldsLeft === 1 ? '' : 's'}. Keep practising!`}</div>
+        <div className={`save-line save-${save}`}>
+          {save === 'saving' && (
+            <>
+              <span className="spinner" /> Sending your score to your teacher…
+            </>
+          )}
+          {save === 'saved' && (
+            <>
+              <Icon name="check" size={22} /> Your teacher got your score!
+            </>
+          )}
+          {save === 'failed' && (
+            <>
+              <Icon name="x" size={22} /> Could not send your score.{' '}
+              <button className="link-btn" onClick={onRetrySave}>
+                Try again
+              </button>
+            </>
+          )}
+          {save === 'offline' && <>Practice round (scores are not being saved yet)</>}
+        </div>
+      </div>
+
+      <div className="victory-ctas">
+        <button className="btn btn-primary btn-lg" onClick={onDone} disabled={save === 'saving'}>
+          DONE
+        </button>
+      </div>
+    </div>
+  )
+}
+
 /* ---------- App ---------- */
 export default function App() {
   const scale = useStageScale()
   const [screen, setScreen] = useState<Screen>('menu')
+  const [mode, setMode] = useState<Mode>('solo')
+  const [player, setPlayer] = useState<{ cls: string; name: string } | null>(null)
+  const [cls, setCls] = useState<string>(() => {
+    const p = new URLSearchParams(window.location.search).get('class')?.toUpperCase() || ''
+    return CLASSES[p] ? p : ''
+  })
   const [starter, setStarter] = useState<TeamId>('comets')
   const [turn, setTurn] = useState<TeamId>('comets')
   const [scores, setScores] = useState<Scores>({ comets: 0, rockets: 0 })
   const [missionsCorrect, setMissionsCorrect] = useState(0)
+  const [bossResult, setBossResult] = useState({ shieldsLeft: 0, correct: 0, hints: 0 })
+  const [save, setSave] = useState<SaveState>('saving')
   const [sound, setSoundState] = useState(() => {
     try {
       return localStorage.getItem('10x-sound') !== 'off'
@@ -780,12 +1056,18 @@ export default function App() {
     }
   })
   const [howTo, setHowTo] = useState(false)
+  const [teamSetup, setTeamSetup] = useState(false)
   const [paused, setPaused] = useState(false)
   const [confirmMenu, setConfirmMenu] = useState(false)
   const [runId, setRunId] = useState(0)
   const [warp, setWarp] = useState(0)
+  const records = useRef<Rec[]>([])
+  const startedAt = useRef(0)
 
   useEffect(() => setSound(sound), [sound])
+  useEffect(() => {
+    resendPending()
+  }, [])
 
   const toggleSound = () => {
     setSoundState((s) => {
@@ -808,24 +1090,81 @@ export default function App() {
   }
 
   const addPoints = useCallback((t: TeamId, n: number) => setScores((s) => ({ ...s, [t]: s[t] + n })), [])
+  const onRecord = useCallback((r: Rec) => {
+    records.current.push(r)
+  }, [])
 
-  const startGame = () => {
+  const resetRun = (first: TeamId) => {
     setScores({ comets: 0, rockets: 0 })
-    setTurn(starter)
+    setTurn(first)
     setMissionsCorrect(0)
     setRunId((r) => r + 1)
     setPaused(false)
+    records.current = []
+    startedAt.current = Date.now()
+  }
+
+  const startTeam = () => {
+    setMode('team')
+    setTeamSetup(false)
+    resetRun(starter)
     go('mission')
+  }
+
+  const startSolo = (name: string) => {
+    setMode('solo')
+    setPlayer({ cls, name })
+    resetRun('comets')
+    go('mission')
+  }
+
+  const sendResult = async (p: { cls: string; name: string }, payload: Parameters<typeof finishAttempt>[2]) => {
+    if (!connected()) {
+      setSave('offline')
+      return
+    }
+    setSave('saving')
+    const ok = await finishAttempt(p.cls, p.name, payload)
+    setSave(ok ? 'saved' : 'failed')
+  }
+
+  const lastPayload = useRef<Parameters<typeof finishAttempt>[2] | null>(null)
+
+  const onBossFinish = (shieldsLeft: number, correct: number, hints: number) => {
+    setBossResult({ shieldsLeft, correct, hints })
+    if (mode === 'team') {
+      sfx.victory()
+      go('victory')
+      return
+    }
+    if (shieldsLeft <= 0) sfx.victory()
+    go('solo-results')
+    if (player) {
+      const payload = {
+        score: scores.comets,
+        missions: missionsCorrect,
+        boss: correct,
+        hints,
+        startedAt: startedAt.current,
+        details: [...records.current],
+      }
+      lastPayload.current = payload
+      sendResult(player, payload)
+    }
   }
 
   const restartMission = () => {
     setPaused(false)
-    startGame()
+    if (mode === 'team') startTeam()
+    else {
+      // Solo players can't restart (one attempt) — just resume.
+    }
   }
 
   const toMenu = () => {
     setPaused(false)
     setConfirmMenu(false)
+    setPlayer(null)
     go('menu')
   }
 
@@ -841,54 +1180,69 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [screen, howTo])
 
+  const playProps: PlayProps = {
+    mode,
+    player,
+    turn,
+    setTurn,
+    scores,
+    addPoints,
+    paused,
+    onPause: () => setPaused(true),
+    sound,
+    toggleSound,
+    onRecord,
+    runId,
+  }
+
   return (
     <div className="viewport">
       <div className="stage" style={{ transform: `translate(-50%, -50%) scale(${scale})` }}>
         <div key={warp} className="warp-in">
           {screen === 'menu' && (
             <>
-              <MainMenu starter={starter} setStarter={setStarter} onPlay={startGame} onHowTo={() => setHowTo(true)} />
+              <MainMenu onSolo={() => go(cls ? 'name' : 'class')} onTeam={() => setTeamSetup(true)} onHowTo={() => setHowTo(true)} />
               <div className="hud-right">
                 <SoundButton on={sound} toggle={toggleSound} />
               </div>
             </>
           )}
+          {screen === 'class' && (
+            <ClassPick
+              onBack={() => go('menu')}
+              onPick={(c) => {
+                setCls(c)
+                go('name')
+              }}
+            />
+          )}
+          {screen === 'name' && cls && <NamePick cls={cls} onBack={() => go('class')} onConfirm={startSolo} />}
           {screen === 'mission' && (
             <Mission
-              runId={runId}
-              turn={turn}
-              setTurn={setTurn}
-              scores={scores}
-              addPoints={addPoints}
-              paused={paused}
-              onPause={() => setPaused(true)}
-              sound={sound}
-              toggleSound={toggleSound}
+              {...playProps}
               onDone={(c) => {
                 setMissionsCorrect(c)
-                setTurn(starter)
+                setTurn(mode === 'team' ? starter : 'comets')
                 go('boss')
               }}
             />
           )}
-          {screen === 'boss' && (
-            <Boss
-              runId={runId}
-              turn={turn}
-              setTurn={setTurn}
-              scores={scores}
-              addPoints={addPoints}
-              paused={paused}
-              onPause={() => setPaused(true)}
+          {screen === 'boss' && <Boss {...playProps} onFinish={onBossFinish} />}
+          {screen === 'victory' && <Victory scores={scores} missionsCorrect={missionsCorrect} onAgain={startTeam} onMenu={() => go('menu')} sound={sound} toggleSound={toggleSound} />}
+          {screen === 'solo-results' && player && (
+            <SoloResults
+              player={player}
+              score={scores.comets}
+              missionsCorrect={missionsCorrect}
+              bossCorrect={bossResult.correct}
+              shieldsLeft={bossResult.shieldsLeft}
+              save={save}
+              onRetrySave={() => lastPayload.current && sendResult(player, lastPayload.current)}
+              onDone={toMenu}
               sound={sound}
               toggleSound={toggleSound}
-              onWin={() => {
-                sfx.victory()
-                go('victory')
-              }}
             />
           )}
-          {screen === 'victory' && <Victory scores={scores} missionsCorrect={missionsCorrect} onAgain={startGame} onMenu={() => go('menu')} sound={sound} toggleSound={toggleSound} />}
         </div>
         <div key={`w${warp}`} className="warp-lines" aria-hidden />
 
@@ -920,13 +1274,13 @@ export default function App() {
             </div>
             <ul className="howto-list">
               <li>
-                <b>8 missions:</b> teams take turns. Each correct answer gives <b>+{MISSION_POINTS}</b> and fills the ship's fuel. You have {MISSION_SECONDS} seconds.
+                <b>8 missions:</b> pick the right answer. Each one gives <b>+{MISSION_POINTS}</b> and fills your ship's fuel. You have {SOLO_SECONDS} seconds for each.
               </li>
               <li>
                 <b>Final boss:</b> find the missing factor to break Captain Null's {BOSS_SHIELDS} shields (<b>+{BOSS_POINTS}</b> each). Drop the zeros, then divide: 40 × ? = 200 → 4 × ? = 20 → 20 ÷ 4 = 5.
               </li>
               <li>
-                <b>Keys:</b> 1–4 or A–D to answer · Enter for next · Esc to pause.
+                <b>You play one time,</b> and your score goes to your teacher. Take your time and think!
               </li>
             </ul>
             <button className="btn btn-primary" onClick={() => setHowTo(false)}>
@@ -935,19 +1289,60 @@ export default function App() {
           </Overlay>
         )}
 
+        {teamSetup && (
+          <Overlay onClose={() => setTeamSetup(false)}>
+            <h2 className="modal-title">TEAM MODE</h2>
+            <p className="modal-text">Two teams take turns on your shared screen. {MISSION_SECONDS}-second timer. Choose who starts:</p>
+            <div className="team-select">
+              {(['comets', 'rockets'] as TeamId[]).map((t) => (
+                <button
+                  key={t}
+                  className={`team-pick team-${t} ${starter === t ? 'selected' : ''}`}
+                  onClick={() => {
+                    sfx.click()
+                    setStarter(t)
+                  }}
+                  aria-pressed={starter === t}
+                >
+                  <span className="team-pick-name">{TEAMS[t].name}</span>
+                  <span className="team-pick-sub">{starter === t ? 'Starts first' : 'Goes second'}</span>
+                  {starter === t && (
+                    <span className="check-badge">
+                      <Icon name="check" size={18} />
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+            <div className="modal-actions row">
+              <button className="btn btn-outline" onClick={() => setTeamSetup(false)}>
+                CANCEL
+              </button>
+              <button className="btn btn-primary" onClick={startTeam}>
+                START
+              </button>
+            </div>
+          </Overlay>
+        )}
+
         {paused && !confirmMenu && (
           <Overlay>
             <h2 className="modal-title">PAUSED</h2>
+            {mode === 'solo' && <p className="modal-text">The timer is stopped. Take a breath!</p>}
             <div className="modal-actions">
               <button className="btn btn-primary" onClick={() => setPaused(false)}>
                 RESUME
               </button>
-              <button className="btn btn-outline" onClick={restartMission}>
-                RESTART MISSION
-              </button>
-              <button className="btn btn-ghost" onClick={() => setConfirmMenu(true)}>
-                MAIN MENU
-              </button>
+              {mode === 'team' && (
+                <>
+                  <button className="btn btn-outline" onClick={restartMission}>
+                    RESTART MISSION
+                  </button>
+                  <button className="btn btn-ghost" onClick={() => setConfirmMenu(true)}>
+                    MAIN MENU
+                  </button>
+                </>
+              )}
             </div>
           </Overlay>
         )}
