@@ -2,7 +2,7 @@
 
 // The Apps Script "Web app URL" (ends in /exec). Paste it between the quotes,
 // or set VITE_SCRIPT_URL in Vercel → Settings → Environment Variables.
-const PASTED_URL = ''
+const PASTED_URL = 'https://script.google.com/macros/s/AKfycbxFqGExA4ivF6dvKLSSaPrtD6BEJhykv27Q4lJlhzJ_H3oIoqV2CPXN_UPGElguwVan/exec'
 export const SCRIPT_URL: string = (import.meta.env.VITE_SCRIPT_URL as string | undefined) || PASTED_URL
 
 export const connected = () => SCRIPT_URL.startsWith('https://') || SCRIPT_URL.startsWith('http://localhost')
